@@ -71,7 +71,7 @@
 (defvar tron-initial-velocity-y 0
   "Initial Y velocity of tron.")
 
-(defvar tron-tick-period 0.1
+(defvar tron-tick-period .075
   "The default time taken for the tron to advance one square.")
 
 (defvar tron-mode-hook nil
@@ -456,7 +456,7 @@ Argument TRON-BUFFER is the name of the buffer."
   (let ((queue nil) (count 0))
     (when (tron-empty-cell node) 
       (setq queue (cons node queue))
-      (while (and (< count 1000) queue)
+      (while queue
         (let ((N (car queue)))
           (setq queue (cdr queue))
           (when (tron-empty-cell N)
@@ -468,7 +468,6 @@ Argument TRON-BUFFER is the name of the buffer."
                 (let ((n (cons (car w) (- (cdr w) 1)))
                       (s (cons (car w) (+ (cdr w) 1))))
                   (aset tron-fill-vector (tron-fill-vector-index (car w) (cdr w)) t)
-                  ;(gamegrid-set-cell (car w) (cdr w) tron-crash)
                   (cl-incf count)
                   (when (tron-empty-cell n) (setq queue (cons n queue)))
                   (when (tron-empty-cell s) (setq queue (cons s queue)))
