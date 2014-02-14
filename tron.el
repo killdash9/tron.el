@@ -189,6 +189,12 @@ and then start moving it leftwards.")
 (defvar tron-null-map
   (let ((map (make-sparse-keymap 'tron-null-map)))
     (define-key map "n"		'tron-start-game)
+    (define-key map "q"		'kill-this-buffer)
+    map))
+
+(defvar tron-scores-map
+  (let ((map (make-sparse-keymap 'tron-scores-map)))
+    (define-key map "q"		'tron-kill-and-restore-window-config)
     map))
 
 ;; ;;;;;;;;;;;;;;;; game functions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -235,14 +241,14 @@ and then start moving it leftwards.")
             (cl-loop for x from 1 to (- tron-width 2) do
                      (gamegrid-set-cell x y tron-blank)))))
 
-(defmacro player-get-var (player var)
+(defmacro tron-player-get-var (player var)
   `(let* ((suffix (if (= ,player 0) "" (number-to-string ,player)))
           (varname (concat "tron" suffix "-" (symbol-name (quote ,var))))
           (symbol (intern varname)))
      (when (boundp symbol)
        (symbol-value symbol))))
 
-(defmacro player-set-var (player var val)
+(defmacro tron-player-set-var (player var val)
   `(let* ((suffix (if (= ,player 0) "" (number-to-string ,player)))
           (varname (concat "tron" suffix "-" (symbol-name (quote ,var)))))
      (set (make-local-variable (intern varname)) ,val )))
@@ -251,15 +257,16 @@ and then start moving it leftwards.")
   (gamegrid-kill-timer)
   (tron-init-buffer)
   (dotimes (player numplayers)
-	(player-set-var player velocity-x	tron-initial-velocity-x)
-	(player-set-var player velocity-y	tron-initial-velocity-y)
-	(player-set-var player positions		nil)
-	(player-set-var player score		0)
-	(player-set-var player paused		nil)
-	(player-set-var player velocity-queue    nil)
-	(player-set-var player dead    nil)
+	(tron-player-set-var player velocity-x	tron-initial-velocity-x)
+	(tron-player-set-var player velocity-y	tron-initial-velocity-y)
+	(tron-player-set-var player positions		nil)
+	(tron-player-set-var player score		0)
+	(tron-player-set-var player paused		nil)
+	(tron-player-set-var player velocity-queue    nil)
+	(tron-player-set-var player dead    nil)
+	(tron-player-set-var player room    nil)
 
-    (player-set-var 
+    (tron-player-set-var 
      player 
      position 
      (vector (+ tron-initial-x (* 0 player)) (+ tron-initial-y (* 3 player)))))
@@ -270,16 +277,16 @@ and then start moving it leftwards.")
 Advances the tron one square, testing for collision.
 Argument TRON-BUFFER is the name of the buffer."
   (dotimes (player numplayers)
-    (when (not (player-get-var player dead))
+    (when (not (tron-player-get-var player dead))
       (when (and (not tron-paused)
                  (eq (current-buffer) tron-buffer))
         (tron-update-velocity player)
-        (let* ((pos (player-get-var player position))
-               (x (+ (aref pos 0) (player-get-var player velocity-x)))
-               (y (+ (aref pos 1) (player-get-var player velocity-y)))
+        (let* ((pos (tron-player-get-var player position))
+               (x (+ (aref pos 0) (tron-player-get-var player velocity-x)))
+               (y (+ (aref pos 1) (tron-player-get-var player velocity-y)))
                (c (gamegrid-get-cell x y)))
           (if (not (= c tron-blank))
-              (progn (player-set-var player dead t)
+              (progn (tron-player-set-var player dead t)
                      (gamegrid-set-cell x y tron-crash)
                      (when (= 10 player) (tron-end-game))
                      )
@@ -288,14 +295,17 @@ Argument TRON-BUFFER is the name of the buffer."
                 (cl-incf tron-score)
                 (tron-update-score))
               (gamegrid-set-cell x y (+ player tron-player)))
-            (player-set-var player position
+            (tron-player-set-var player position
                             (vector x y) )
-            (player-set-var player moved-p nil))))))
+            (tron-player-set-var player moved-p nil))))))
   (let ((dead-player-count 0))
     (dotimes (player numplayers)
-      (when (player-get-var player dead) (cl-incf dead-player-count)))
-    (when (= numplayers dead-player-count) (tron-end-game)))
-  )
+      (let ((dead (tron-player-get-var player dead)))
+        (when dead
+          (if (= 0 player)
+              (tron-end-game)
+            (cl-incf dead-player-count)))))
+    (when (>= dead-player-count (- numplayers 1)) (tron-end-game))))
 
 (defun tron-update-velocity (player)
   (if (= player 0)
@@ -323,7 +333,12 @@ Argument TRON-BUFFER is the name of the buffer."
              (fr (tron-obstacle-at fr-coord))
              (l (tron-obstacle-at l-coord))
              (r (tron-obstacle-at r-coord))
-             (possibly-turn (lambda () (when (= (random 20) 0)
+             (rm (tron-player-get-var player room))
+             (turnprob (if 
+                           (or (not rm) (> rm 500)) 
+                           20 100))
+                                        ; turn less frequently when we're in a small space
+             (possibly-turn (lambda () (when (= (random turnprob) 0)
                                     (cond 
                                      ((and l (not r)) (tron-turn player right))
                                      ((and r (not l)) (tron-turn player left))
@@ -379,6 +394,7 @@ Argument TRON-BUFFER is the name of the buffer."
 
                                  ;; clear out any lower-scored options
                                  (let ((topscore (caar adjacent-points-list)))
+                                   (tron-player-set-var player room topscore)
                                    (delete-if-not (lambda (x) (= (car x) topscore)) adjacent-points-list))
                                  
                                  ;; collect all remaining options into a single list
@@ -399,9 +415,9 @@ Argument TRON-BUFFER is the name of the buffer."
   (not (= 0 (gamegrid-get-cell (car coords) (cdr coords)))))
 
 (defun tron-surrounding-coordinates (player forward right) 
-  (let* ((pos (player-get-var player position))
-         (vx (player-get-var player velocity-x))
-         (vy (player-get-var player velocity-y))
+  (let* ((pos (tron-player-get-var player position))
+         (vx (tron-player-get-var player velocity-x))
+         (vy (tron-player-get-var player velocity-y))
          (vv (cons vx vy))
          (pv (tron-add-vector 
               (tron-mul-vector forward vv) 
@@ -418,15 +434,15 @@ Argument TRON-BUFFER is the name of the buffer."
   (cons (+ (car v1) (car v2)) (+ (cdr v1) (cdr v2))))
 
 (defmacro tron-turn (player direction)
-  `(let ((vx (player-get-var ,player velocity-x))
-         (vy (player-get-var ,player velocity-y)))
+  `(let ((vx (tron-player-get-var ,player velocity-x))
+         (vy (tron-player-get-var ,player velocity-y)))
      (if (eql 'left (quote ,direction))
          (tron-set-velocity ,player (tron-make-left-turn vx vy))
        (tron-set-velocity ,player (tron-make-right-turn vx vy)))))
 
 (defun tron-set-velocity (player new-velocity)
-  (player-set-var player velocity-x (car new-velocity)) 
-  (player-set-var player velocity-y (cdr new-velocity)))
+  (tron-player-set-var player velocity-x (car new-velocity)) 
+  (tron-player-set-var player velocity-y (cdr new-velocity)))
   
 (defun tron-make-right-turn(vx vy)
   (pcase (cons vx vy)
@@ -518,7 +534,25 @@ Argument TRON-BUFFER is the name of the buffer."
     (setf (timer--repeat-delay gamegrid-timer) nil))
   (gamegrid-kill-timer)
   (use-local-map tron-null-map) 
-  (gamegrid-add-score tron-score-file tron-score))
+  (tron-push-window-configuration)
+  (gamegrid-add-score tron-score-file tron-score)
+  (with-current-buffer (window-buffer)
+    (use-local-map tron-scores-map)))
+
+(defun tron-push-window-configuration ()
+  (setq tron-window-configuration
+       (current-window-configuration))
+  (put 'tron-window-configuration 'permanent-local t))
+
+(defun tron-pop-window-configuration ()
+  (when (boundp 'tron-window-configuration)
+      (set-window-configuration tron-window-configuration)
+    ))
+
+(defun tron-kill-and-restore-window-config ()
+  (interactive)
+  (kill-this-buffer)
+  (tron-pop-window-configuration))
 
 (defun tron-start-game ()
   "Start a new game of tron."
