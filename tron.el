@@ -195,6 +195,9 @@ and then start moving it leftwards.")
 (defvar tron-scores-map
   (let ((map (make-sparse-keymap 'tron-scores-map)))
     (define-key map "q"		'tron-kill-and-restore-window-config)
+    (define-key map "n"		(lambda () (interactive) 
+                              (progn (tron-kill-and-restore-window-config) 
+                                     (tron-start-game))))
     map))
 
 ;; ;;;;;;;;;;;;;;;; game functions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
