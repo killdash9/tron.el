@@ -167,6 +167,7 @@ we implemented all your keystrokes immediately, the tron would
 effectively never move up.  Thus, we need to move it up for one turn
 and then start moving it leftwards.")
 
+(make-variable-buffer-local 'tron-demo)
 (make-variable-buffer-local 'tron-score)
 (make-variable-buffer-local 'tron-paused)
 (make-variable-buffer-local 'tron-velocity-queue)
@@ -185,6 +186,9 @@ and then start moving it leftwards.")
     (define-key map [up]		'tron-move-up)
     (define-key map [down]	'tron-move-down)
     map))
+
+(defvar tron-demo-map ;; a null map
+  '(keymap))
 
 (defvar tron-null-map
   (let ((map (make-sparse-keymap 'tron-null-map)))
@@ -311,7 +315,7 @@ Argument TRON-BUFFER is the name of the buffer."
     (when (>= dead-player-count (- numplayers 1)) (tron-end-game))))
 
 (defun tron-update-velocity (player)
-  (if (= player 0)
+  (if (and (not tron-demo) (= player 0))
       ;; take care of manual player
       (if tron-velocity-queue
           (let ((new-vel (car (last tron-velocity-queue))))
@@ -331,9 +335,13 @@ Argument TRON-BUFFER is the name of the buffer."
              (fl-coord (tron-surrounding-coordinates player 1 -1))
              (fm-coord (tron-surrounding-coordinates player 1 0))
              (fr-coord (tron-surrounding-coordinates player 1 1))
+             (bl-coord (tron-surrounding-coordinates player -1 -1))
+             (br-coord (tron-surrounding-coordinates player -1 1))
              (fl (tron-obstacle-at fl-coord))
              (fm (tron-obstacle-at fm-coord))
              (fr (tron-obstacle-at fr-coord))
+             (bl (tron-obstacle-at bl-coord))
+             (br (tron-obstacle-at br-coord))
              (l (tron-obstacle-at l-coord))
              (r (tron-obstacle-at r-coord))
              (rm (tron-player-get-var player room))
@@ -528,19 +536,25 @@ Argument TRON-BUFFER is the name of the buffer."
   (when (zerop (tron-final-y-velocity))
     (push '(0 1) tron-velocity-queue)))
 
-(defun tron-end-game ()
+(defun tron-end-game (&optional norestart)
   "Terminate the current game."
   (interactive)
-  
-  ;; works around a race condition in timer logic
-  (when gamegrid-timer
-    (setf (timer--repeat-delay gamegrid-timer) nil))
-  (gamegrid-kill-timer)
-  (use-local-map tron-null-map) 
-  (tron-push-window-configuration)
-  (gamegrid-add-score tron-score-file tron-score)
-  (with-current-buffer (window-buffer)
-    (use-local-map tron-scores-map)))
+  (when (eq (current-buffer) (get-buffer tron-buffer-name))
+    ;; works around a race condition in timer logic
+    (when gamegrid-timer
+      (setf (timer--repeat-delay gamegrid-timer) nil))
+    (gamegrid-kill-timer)
+    (if tron-demo
+        (progn
+          (if norestart
+              (kill-this-buffer)
+            (sit-for 1.5)
+            (tron-start-game)))
+      (use-local-map tron-null-map) 
+      (tron-push-window-configuration)
+      (gamegrid-add-score tron-score-file tron-score)
+      (with-current-buffer (window-buffer)
+        (use-local-map tron-scores-map)))))
 
 (defun tron-push-window-configuration ()
   (setq tron-window-configuration
@@ -618,9 +632,6 @@ tron mode keybindings:
 ;;;###autoload
 (defun tron ()
   "Play the tron game.
-Move the tron around without colliding with its tail or with the border.
-
-Eating dots causes the tron to get longer.
 
 tron mode keybindings:
    \\<tron-mode-map>
@@ -634,13 +645,32 @@ tron mode keybindings:
   (interactive)
 
   (switch-to-buffer tron-buffer-name)
+  (setq tron-demo nil)
   (when gamegrid-timer
     (setf (timer--repeat-delay gamegrid-timer) nil))
   (gamegrid-kill-timer)
   (tron-mode)
   (tron-start-game))
 
+;;;###autoload
+(defun tron-demo ()
+
+  (interactive)
+
+  (let ((tron-tick-period .02))
+    (switch-to-buffer tron-buffer-name)
+    (delete-other-windows)
+
+    (when gamegrid-timer
+      (setf (timer--repeat-delay gamegrid-timer) nil))
+    (gamegrid-kill-timer)
+    (tron-mode)
+    (setq tron-demo t)
+    (tron-start-game)
+    (use-local-map tron-demo-map)
+    (read-event)
+    (tron-end-game t)))
+
 (provide 'tron)
 
 ;;; tron.el ends here
-                                                                                                                                                                                                                                           
